@@ -13,6 +13,7 @@ yet.
 
 - PSP-1000, 480 × 272 display
 - PSPDEV / PSPSDK toolchain
+- No expanded-memory request (`PSP_LARGE_MEMORY=0`)
 - Native C/C++ homebrew, packaged as `EBOOT.PBP`
 - First milestone: one arena, two fighters, movement, attacks, hit detection,
   health, and a match restart flow
