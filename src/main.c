@@ -955,6 +955,7 @@ static void update_cpu(void) {
     if (ai_reaction > 0) --ai_reaction;
     else {
         ai_reaction = cpu_reaction_frames();
+        float preferred_distance = get_species(f->species)->physical ? 34.0f : 100.0f;
         int threatened = 0;
         for (int i = 0; i < MAX_PROJECTILES; ++i) {
             Projectile *p = &projectiles[i];
@@ -968,11 +969,13 @@ static void update_cpu(void) {
             do_protect(&cpu_team);
         }
         if (f->ultimate >= 100 && distance < 230.0f) begin_ultimate(&cpu_team);
-        else if (distance > 92.0f) {
-            f->x += f->aim_x * (save_data.difficulty == 2 ? 1.15f : 0.82f);
-            f->y += f->aim_y * (save_data.difficulty == 2 ? 1.15f : 0.82f);
+        else if (distance > preferred_distance + 12.0f) {
+            float step = save_data.difficulty == 0 ? 0.72f :
+                         save_data.difficulty == 2 ? 1.15f : 0.92f;
+            f->x += f->aim_x * step;
+            f->y += f->aim_y * step;
             f->moving = 1;
-        } else if (distance < 50.0f) {
+        } else if (distance < preferred_distance - 16.0f) {
             f->x -= f->aim_x * 0.65f; f->y -= f->aim_y * 0.65f;
             f->moving = 1;
         }
