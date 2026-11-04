@@ -10,7 +10,6 @@
 #include <pspiofilemgr.h>
 #include <pspkernel.h>
 #include <pspmoduleinfo.h>
-#include <psputils.h>
 
 PSP_MODULE_INFO("PokemonArena2D", 0, 0, 1);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
@@ -19,6 +18,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define SCREEN_W 480
 #define SCREEN_H 272
 #define BUFFER_W 512
+#define UNCACHED_POINTER(address) ((uint16_t *)((uintptr_t)(address) | 0x40000000u))
 #define TEAM_SIZE 3
 #define ROSTER_SIZE 25
 #define MAX_PROJECTILES 24
@@ -1785,9 +1785,10 @@ int main(void) {
     log_result("sceCtrlSetSamplingMode",
                sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG));
     log_result("sceDisplaySetMode", sceDisplaySetMode(0, SCREEN_W, SCREEN_H));
-    draw_buffer = framebuffers[0];
-    display_buffer = framebuffers[1];
-    sceKernelDcacheWritebackAll();
+    /* Keep both display buffers in the PSP's uncached memory alias.  The
+     * display controller then sees every pixel as soon as it is written. */
+    draw_buffer = UNCACHED_POINTER(framebuffers[0]);
+    display_buffer = UNCACHED_POINTER(framebuffers[1]);
     log_result("sceDisplaySetFrameBuf",
                sceDisplaySetFrameBuf(display_buffer, BUFFER_W,
                                      PSP_DISPLAY_PIXEL_FORMAT_565,
@@ -1809,9 +1810,6 @@ int main(void) {
         if (frame_number == 0) log_line("DRAW: first frame started");
         draw_screen();
         if (frame_number == 0) log_line("DRAW: first frame completed");
-        /* The display controller reads RAM directly.  Flush the CPU cache
-         * before this buffer becomes the visible framebuffer. */
-        sceKernelDcacheWritebackAll();
         uint16_t *old_display = display_buffer;
         display_buffer = draw_buffer;
         draw_buffer = old_display;
