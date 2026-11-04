@@ -1,13 +1,19 @@
 # Pokémon Arena 2D for PSP
 
-This project is based on [Empress Pokémon 2D Arena](https://omniscye.itch.io/empress-pokemon-2d-arena).
-It is an unofficial PSP-1000 homebrew reimplementation. The supplied Windows
-and Android packages are reference material; the game itself is being built
-natively for PSP rather than by porting the Unity executables.
+This PSP-1000 homebrew targets the browser game [Poke2D Arena](https://poke2darena.com/).
+The web edition describes itself as an independent project. This repository
+uses a native PSP implementation; it does not run the browser game or Phaser.
 
-The Windows and Android reference packages are Unity IL2CPP builds. They are
-research inputs only; no reference-game assets are included in this repository
-yet.
+The Windows and Android package analyzed earlier is **Empress: Pokémon 2D
+Arena**, a separate Unity IL2CPP game. Its metadata is documented in
+[`docs/reverse-engineering.md`](docs/reverse-engineering.md), but it is not
+ground truth for the Poke2D Arena web edition. Web findings are recorded in
+[`docs/poke2d-web-reference.md`](docs/poke2d-web-reference.md).
+
+No assets from either game are included. The Poke2D Arena site says its code,
+battle simulation, effects, arenas, interface, story and screenshots should
+not be copied or redistributed without written permission; this project uses
+independent PSP code and placeholder visuals.
 
 ## Target
 
@@ -15,21 +21,19 @@ yet.
 - PSPDEV / PSPSDK toolchain
 - No expanded-memory request (`PSP_LARGE_MEMORY=0`)
 - Native C/C++ homebrew, packaged as `EBOOT.PBP`
-- First milestone: one arena, two fighters, movement, attacks, hit detection,
-  health, and a match restart flow
+- First target slice: one arena, two three-member teams with one active fighter
+  per side, movement, attack, dodge, switching, health and match restart
 
 ## Current status
 
-Static metadata from the reference build identifies real-time combat systems
-for input, movement, attacks, dodging, switching Pokémon, projectiles, and
-arena collisions. Exact controls, timing, damage rules, visuals, and match flow
-still need confirmation from the running game. See
-[`docs/reverse-engineering.md`](docs/reverse-engineering.md).
+The website describes a 60-tick-per-second real-time battle simulation, three-
+Pokemon teams, aimed attacks, cooldown skills, dash, switching and type
+matchups. Its guides provide detailed combat timings. See
+[`docs/poke2d-web-reference.md`](docs/poke2d-web-reference.md).
 
-The repository now contains the first native PSP prototype: a placeholder
-arena loop with movement, a CPU opponent, projectiles, health, dodge, and a
-fighter-swap placeholder. Its button mapping and combat values are provisional
-until they are compared with an observed reference match.
+The repository contains an early native PSP arena prototype with movement, a
+CPU opponent, projectiles and health. It is still a one-fighter placeholder and
+does not yet implement the site's three-member team or combat rules.
 
 ## Controls in the prototype
 
@@ -40,7 +44,8 @@ until they are compared with an observed reference match.
 - Start: restart after a knockout
 - Select: exit
 
-These are temporary prototype controls, not yet confirmed reference controls.
+These are temporary controls. The PSP port will need its own mapping for the
+web edition's five battle actions and teammate switching.
 
 ## Build
 
@@ -49,10 +54,10 @@ directory. The build target is `EBOOT.PBP`.
 
 ## Work plan
 
-1. Record the reference game's controls, arena dimensions, fighter states, and
-   match rules from a short observed match.
-2. Inventory candidate sprite and audio assets and decide which can be used in
-   the homebrew.
-3. Implement a PSP input/render loop and one playable arena as a vertical slice.
-4. Compare it against the reference, then add moves, fighters, and menus in
-   small increments.
+1. Replace the placeholder single fighters with three-member teams and active-
+   fighter switching.
+2. Implement the 60 Hz combat loop, cooldowns, dash, and attack aiming from the
+   documented web rules.
+3. Add a small roster, one arena and CPU behavior that fit PSP-1000 memory.
+4. Use original or explicitly licensed visuals and add further modes only
+   after the battle slice is stable.
