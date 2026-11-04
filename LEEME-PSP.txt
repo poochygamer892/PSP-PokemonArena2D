@@ -1,0 +1,31 @@
+POKEMON ARENA 2D - PSP-1000
+
+INSTALACION
+1. Descomprime todo el ZIP en la raiz de la Memory Stick.
+2. Debe quedar PSP/GAME/PokemonArena2D/EBOOT.PBP y la carpeta assets/ junto a el.
+3. En la PSP, abre Juego > Memory Stick > Pokemon Arena 2D.
+
+CONTROLES EN PARTIDA
+Stick analogico o cruceta: moverse
+L + cruceta: apuntar
+X: ataque basico
+Cuadrado: habilidad
+L + Cuadrado: Protect
+Circulo: dash
+Triangulo: ultimate
+R: cambiar al siguiente companero disponible
+Start: pausa
+Select: salir
+
+EN MENUS
+Cruceta: moverse por las opciones
+X: confirmar
+Circulo: volver
+
+Incluye Quick Battle, VS CPU, Story de 16 retos, editor de tres equipos,
+seis arenas, 25 Pokemon, tres dificultades de CPU y guardado en Memory Stick.
+El modo online, el brawl de tres jugadores y la plantilla completa de la web
+no estan implementados en esta version PSP.
+
+Los sprites comunitarios y sus creditos/licencia estan en assets/.
+Es un proyecto fan no comercial y no oficial.

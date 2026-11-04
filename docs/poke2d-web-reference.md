@@ -88,8 +88,12 @@ The site's About page says its original code, battle simulation and rules,
 effects, arenas, interface, story script, text and screenshots should not be
 copied, re-hosted or redistributed without written permission. It identifies
 some third-party assets as CC0 or CC BY 4.0 and points to in-game credits.
-Therefore this repository should use original placeholder or newly created
-visuals, or assets whose specific license and attribution have been checked.
+This repository does not reuse the website's artwork or files. The PSP build
+instead uses separately sourced community Pokémon sprites from PMD SpriteCollab,
+selected from their attribution records and converted to a small RGB565 atlas.
+See [`assets/SPRITE_CREDITS.md`](../assets/SPRITE_CREDITS.md) and the included
+license text. That sprite contribution license is non-commercial and does not
+license Pokémon trademarks or rights held by their owners.
 
 ## Sources
 

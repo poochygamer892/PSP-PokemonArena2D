@@ -1,63 +1,66 @@
-# Pokémon Arena 2D for PSP
+# Pokémon Arena 2D for PSP-1000
 
-This PSP-1000 homebrew targets the browser game [Poke2D Arena](https://poke2darena.com/).
-The web edition describes itself as an independent project. This repository
-uses a native PSP implementation; it does not run the browser game or Phaser.
+An independent native homebrew adaptation for the PSP, based on the general
+real-time arena concept of [Poke2D Arena](https://poke2darena.com/). It does not
+run the website or its Phaser code. It uses original PSP menus and arenas, plus
+community-contributed Pokémon fan sprites credited in
+[`assets/SPRITE_CREDITS.md`](assets/SPRITE_CREDITS.md).
 
-The Windows and Android package analyzed earlier is **Empress: Pokémon 2D
-Arena**, a separate Unity IL2CPP game. Its metadata is documented in
-[`docs/reverse-engineering.md`](docs/reverse-engineering.md), but it is not
-ground truth for the Poke2D Arena web edition. Web findings are recorded in
-[`docs/poke2d-web-reference.md`](docs/poke2d-web-reference.md).
+The website's own game graphics and files are not included. The sprite atlas
+comes from PMD SpriteCollab, not from Poke2D Arena. Sprite contributions are
+licensed for non-commercial use with attribution; see the included license and
+credits. Pokémon names and characters belong to their respective rights
+holders. This is an unofficial fan project.
 
-No assets from either game are included. The Poke2D Arena site says its code,
-battle simulation, effects, arenas, interface, story and screenshots should
-not be copied or redistributed without written permission; this project uses
-independent PSP code and placeholder visuals.
+## Playable modes
 
-## Target
+- **Quick Battle:** random three-member teams against the CPU.
+- **VS CPU:** three saved team slots, selectable arena, and Easy, Normal, or
+  Hard CPU difficulty.
+- **Story:** 16 original one-on-one challenges across four chapters, with
+  saved progress and a selectable starter.
+- **Team Builder:** edit the three Pokémon in each of three saved teams.
+- **Settings:** CPU difficulty, default arena, reduced flashes, and Story
+  starter.
+- **Battle:** six arenas, 25 Pokémon, all 18 type matchups, basic attack,
+  skill, Protect, dash, ultimate, switching, status effects, and timed supplies.
 
-- PSP-1000, 480 × 272 display
-- PSPDEV / PSPSDK toolchain
-- No expanded-memory request (`PSP_LARGE_MEMORY=0`)
-- Native C/C++ homebrew, packaged as `EBOOT.PBP`
-- First target slice: one arena, two three-member teams with one active fighter
-  per side, movement, attack, dodge, switching, health and match restart
+This is an offline PSP build. The web edition's online rooms, three-player
+brawl, full 1,066-entry roster, and move editor are not implemented here.
 
-## Current status
-
-The website describes a 60-tick-per-second real-time battle simulation, three-
-Pokemon teams, aimed attacks, cooldown skills, dash, switching and type
-matchups. Its guides provide detailed combat timings. See
-[`docs/poke2d-web-reference.md`](docs/poke2d-web-reference.md).
-
-The repository contains an early native PSP arena prototype with movement, a
-CPU opponent, projectiles and health. It is still a one-fighter placeholder and
-does not yet implement the site's three-member team or combat rules.
-
-## Controls in the prototype
+## PSP controls
 
 - Analog stick or D-pad: move
-- Cross: attack
-- Circle: dodge
-- Triangle: swap fighter profile
-- Start: restart after a knockout
-- Select: exit
+- Hold **L** + D-pad: aim
+- **Cross:** basic attack
+- **Square:** skill; **L + Square:** Protect
+- **Circle:** dash
+- **Triangle:** ultimate
+- **R:** switch to the next available teammate
+- **Start:** pause; **Select:** exit
 
-These are temporary controls. The PSP port will need its own mapping for the
-web edition's five battle actions and teammate switching.
+In menus, use the D-pad, **Cross** to select, and **Circle** to go back. In the
+Team Builder, **Up/Down** chooses a Pokémon, **Left/Right** selects a team,
+**L/R** changes the party slot, and **Cross** saves it.
 
-## Build
+Save data is written to `ms0:/PSP/SAVEDATA/POKE2D/`. The sprite atlas is read
+from `ms0:/PSP/GAME/PokemonArena2D/assets/pokemon_atlas.rgb565`; keep the
+`assets` folder beside `EBOOT.PBP` when installing.
 
-With PSPDEV / PSPSDK configured in the environment, run `make` in this
-directory. The build target is `EBOOT.PBP`.
+## Build and install
 
-## Work plan
+With PSPDEV / PSPSDK installed, run `make` in this directory. The output is
+`EBOOT.PBP`. Copy the complete `PSP/GAME/PokemonArena2D/` folder from the ZIP
+to the root of the Memory Stick, then launch it under **Game → Memory Stick**.
 
-1. Replace the placeholder single fighters with three-member teams and active-
-   fighter switching.
-2. Implement the 60 Hz combat loop, cooldowns, dash, and attack aiming from the
-   documented web rules.
-3. Add a small roster, one arena and CPU behavior that fit PSP-1000 memory.
-4. Use original or explicitly licensed visuals and add further modes only
-   after the battle slice is stable.
+`PSP_LARGE_MEMORY=0`; the build does not request the PSP-2000 extended-memory
+mode and targets PSP-1000.
+
+To rebuild the atlas, run `sh tools/build_sprite_atlas.sh` (requires `curl`,
+ImageMagick, and `ffmpeg`). The script uses the pinned upstream commit listed
+in `assets/SPRITE_CREDITS.md` and emits the RGB565 asset expected by the game.
+
+## Reference notes
+
+- Web feature and control observations: [`docs/poke2d-web-reference.md`](docs/poke2d-web-reference.md)
+- Earlier Empress IL2CPP package notes: [`docs/reverse-engineering.md`](docs/reverse-engineering.md)
