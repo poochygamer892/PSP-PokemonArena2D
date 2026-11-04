@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include <pspctrl.h>
+#include <pspdebug.h>
 #include <pspdisplay.h>
 #include <pspiofilemgr.h>
 #include <pspkernel.h>
@@ -33,6 +34,7 @@ PSP_HEAP_SIZE_KB(4096);
 #define ARENA_BOTTOM 216.0f
 #define SAVE_DIR "ms0:/PSP/SAVEDATA/POKE2D"
 #define SAVE_FILE SAVE_DIR "/save.dat"
+#define ERROR_LOG_PATH "ms0:/PSP/GAME/PokemonArena2D/error.log"
 
 typedef enum {
     TYPE_NORMAL, TYPE_FIRE, TYPE_WATER, TYPE_ELECTRIC, TYPE_GRASS, TYPE_ICE,
@@ -216,6 +218,84 @@ static int supply_warning, next_supply_frame;
 static int vs_setup_cursor, story_cursor;
 static Screen team_return_screen = SCREEN_MENU;
 static uint32_t rng_state = 0x2d5a19b3u;
+static char error_trace[4096];
+static int error_trace_length, error_log_created;
+
+static void log_line(const char *message) {
+    int length = (int)strlen(message);
+    if (!error_log_created) {
+        if (error_trace_length + length + 2 <= (int)sizeof(error_trace)) {
+            memcpy(error_trace + error_trace_length, message, length);
+            error_trace_length += length;
+            error_trace[error_trace_length++] = '\r';
+            error_trace[error_trace_length++] = '\n';
+        }
+        return;
+    }
+    SceUID fd = sceIoOpen(ERROR_LOG_PATH,
+                          PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
+    if (fd < 0) return;
+    sceIoWrite(fd, message, length);
+    sceIoWrite(fd, "\r\n", 2);
+    sceIoClose(fd);
+}
+
+static void create_error_log(void) {
+    static const char header[] = "Pokemon Arena 2D PSP error log\r\n";
+    if (error_log_created) return;
+    SceUID fd = sceIoOpen(ERROR_LOG_PATH,
+                          PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+    if (fd < 0) return;
+    sceIoWrite(fd, header, sizeof(header) - 1);
+    if (error_trace_length > 0)
+        sceIoWrite(fd, error_trace, error_trace_length);
+    sceIoClose(fd);
+    error_log_created = 1;
+}
+
+static void record_error(const char *message) {
+    log_line(message);
+    create_error_log();
+}
+
+static void log_result(const char *operation, int result) {
+    char line[128];
+    if (result < 0)
+        snprintf(line, sizeof(line), "ERROR: %s returned %d (0x%08X)",
+                 operation, result, (unsigned int)result);
+    else
+        snprintf(line, sizeof(line), "OK: %s returned %d", operation, result);
+    if (result < 0) record_error(line);
+    else log_line(line);
+}
+
+static void log_hex_register(SceUID fd, const char *name, uint32_t value) {
+    static const char digits[] = "0123456789ABCDEF";
+    char line[64];
+    int length = 0;
+    while (*name && length < 48) line[length++] = *name++;
+    line[length++] = ' ';
+    for (int shift = 28; shift >= 0; shift -= 4)
+        line[length++] = digits[(value >> shift) & 15];
+    line[length++] = '\r';
+    line[length++] = '\n';
+    sceIoWrite(fd, line, length);
+}
+
+static void exception_log_handler(PspDebugRegBlock *regs) {
+    record_error("FATAL PSP EXCEPTION");
+    if (!error_log_created) return;
+    SceUID fd = sceIoOpen(ERROR_LOG_PATH,
+                          PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
+    if (fd < 0) return;
+    if (regs) {
+        log_hex_register(fd, "CAUSE", regs->cause);
+        log_hex_register(fd, "EPC", regs->epc);
+        log_hex_register(fd, "BADVADDR", regs->badvaddr);
+        log_hex_register(fd, "STATUS", regs->status);
+    }
+    sceIoClose(fd);
+}
 
 static const uint8_t font3x5[36][5] = {
     {7,5,7,5,5},{6,5,6,5,6},{7,4,4,4,7},{6,5,5,5,6},{7,4,6,4,7},
@@ -369,13 +449,21 @@ static void load_sprite_atlas(void) {
     const char *atlas_path = "ms0:/PSP/GAME/PokemonArena2D/assets/pokemon_atlas.rgb565";
     const char *animation_path = "ms0:/PSP/GAME/PokemonArena2D/assets/pokemon_animations.rgb565";
     sprites_loaded = read_sprite_asset(atlas_path, sprite_atlas, sizeof(sprite_atlas));
+    if (sprites_loaded) log_line("ASSET: static atlas loaded");
+    else record_error("ERROR: static atlas missing or truncated");
     sprite_animations = (uint16_t *)malloc(SPRITE_ANIMATION_BYTES);
-    if (sprite_animations)
+    if (!sprite_animations) {
+        record_error("ERROR: could not allocate animation atlas; using static sprites");
+    } else {
         animations_loaded = read_sprite_asset(animation_path, sprite_animations,
                                               (int)SPRITE_ANIMATION_BYTES);
-    if (!animations_loaded && sprite_animations) {
-        free(sprite_animations);
-        sprite_animations = NULL;
+        if (animations_loaded) {
+            log_line("ASSET: animation atlas loaded");
+        } else {
+            record_error("ERROR: animation atlas missing or truncated; using static sprites");
+            free(sprite_animations);
+            sprite_animations = NULL;
+        }
     }
 }
 
@@ -1689,19 +1777,36 @@ static void draw_screen(void) {
 }
 
 int main(void) {
-    sceCtrlSetSamplingCycle(0);
-    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
-    sceDisplaySetMode(0, SCREEN_W, SCREEN_H);
+    log_line("BOOT: entered main()");
+    log_result("pspDebugInstallErrorHandler",
+               pspDebugInstallErrorHandler(exception_log_handler));
+    log_result("sceCtrlSetSamplingCycle", sceCtrlSetSamplingCycle(0));
+    log_result("sceCtrlSetSamplingMode",
+               sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG));
+    log_result("sceDisplaySetMode", sceDisplaySetMode(0, SCREEN_W, SCREEN_H));
     draw_buffer = framebuffers[0];
     display_buffer = framebuffers[1];
-    sceDisplaySetFrameBuf(display_buffer, BUFFER_W, PSP_DISPLAY_PIXEL_FORMAT_565, PSP_DISPLAY_SETBUF_IMMEDIATE);
+    log_result("sceDisplaySetFrameBuf",
+               sceDisplaySetFrameBuf(display_buffer, BUFFER_W,
+                                     PSP_DISPLAY_PIXEL_FORMAT_565,
+                                     PSP_DISPLAY_SETBUF_IMMEDIATE));
     load_game();
+    log_line("BOOT: save data initialization completed");
     load_sprite_atlas();
+    log_line("BOOT: asset initialization completed");
+    log_line("BOOT: entering main loop");
+    int input_error_reported = 0;
     for (;;) {
         SceCtrlData pad;
-        sceCtrlPeekBufferPositive(&pad, 1);
+        int input_result = sceCtrlPeekBufferPositive(&pad, 1);
+        if (input_result < 0 && !input_error_reported) {
+            log_result("sceCtrlPeekBufferPositive", input_result);
+            input_error_reported = 1;
+        }
         handle_screen(&pad);
+        if (frame_number == 0) log_line("DRAW: first frame started");
         draw_screen();
+        if (frame_number == 0) log_line("DRAW: first frame completed");
         uint16_t *old_display = display_buffer;
         display_buffer = draw_buffer;
         draw_buffer = old_display;

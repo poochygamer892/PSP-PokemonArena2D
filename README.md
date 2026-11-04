@@ -65,6 +65,8 @@ and animated sprite atlas are read from
 folder beside `EBOOT.PBP` when installing.
 The animation atlas uses a reserved 4 MB heap; if allocation fails, the game
 falls back to the static sprite atlas.
+On a detected failure or caught PSP exception, diagnostics are written to
+`ms0:/PSP/GAME/PokemonArena2D/error.log`. Successful launches do not create it.
 
 ## Build and install
 

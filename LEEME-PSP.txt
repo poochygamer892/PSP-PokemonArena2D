@@ -36,3 +36,9 @@ no estan implementados en esta version PSP.
 
 Los sprites comunitarios, animaciones, creditos y licencia estan en assets/.
 Es un proyecto fan no comercial y no oficial.
+
+DIAGNOSTICO
+error.log solo se crea si se detecta un error o una excepcion.
+Si el juego se cierra, busca:
+PSP/GAME/PokemonArena2D/error.log
+Copia ese archivo al PC y envialo para revisar el ultimo paso del arranque.

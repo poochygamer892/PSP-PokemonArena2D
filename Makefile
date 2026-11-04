@@ -5,7 +5,7 @@ INCDIR =
 CFLAGS = -O2 -G0 -Wall -Wextra
 CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
 ASFLAGS = $(CFLAGS)
-LIBS = -lm
+LIBS = -lm -lpspdebug -lpspkernel
 
 BUILD_PRX = 1
 PSP_FW_VERSION = 660
