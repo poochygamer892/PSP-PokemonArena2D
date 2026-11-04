@@ -10,6 +10,7 @@
 #include <pspiofilemgr.h>
 #include <pspkernel.h>
 #include <pspmoduleinfo.h>
+#include <psputils.h>
 
 PSP_MODULE_INFO("PokemonArena2D", 0, 0, 1);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
@@ -1786,6 +1787,7 @@ int main(void) {
     log_result("sceDisplaySetMode", sceDisplaySetMode(0, SCREEN_W, SCREEN_H));
     draw_buffer = framebuffers[0];
     display_buffer = framebuffers[1];
+    sceKernelDcacheWritebackAll();
     log_result("sceDisplaySetFrameBuf",
                sceDisplaySetFrameBuf(display_buffer, BUFFER_W,
                                      PSP_DISPLAY_PIXEL_FORMAT_565,
@@ -1807,6 +1809,9 @@ int main(void) {
         if (frame_number == 0) log_line("DRAW: first frame started");
         draw_screen();
         if (frame_number == 0) log_line("DRAW: first frame completed");
+        /* The display controller reads RAM directly.  Flush the CPU cache
+         * before this buffer becomes the visible framebuffer. */
+        sceKernelDcacheWritebackAll();
         uint16_t *old_display = display_buffer;
         display_buffer = draw_buffer;
         draw_buffer = old_display;
