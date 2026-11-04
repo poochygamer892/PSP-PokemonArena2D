@@ -1,4 +1,9 @@
-# Reference analysis and PSP port plan
+# Previous reference package: Empress: Pokémon 2D Arena
+
+> Scope: this is analysis of the separate Empress Windows/Android build. The
+> current PSP target is the Poke2D Arena browser edition at
+> https://poke2darena.com/. Do not treat these IL2CPP findings as evidence for
+> that website's TypeScript/Phaser game.
 
 ## Evidence received so far
 
