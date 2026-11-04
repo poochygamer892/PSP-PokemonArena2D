@@ -63,6 +63,8 @@ and animated sprite atlas are read from
 `ms0:/PSP/GAME/PokemonArena2D/assets/`; keep both
 `pokemon_atlas.rgb565` and `pokemon_animations.rgb565` in the `assets`
 folder beside `EBOOT.PBP` when installing.
+The animation atlas uses a reserved 4 MB heap; if allocation fails, the game
+falls back to the static sprite atlas.
 
 ## Build and install
 

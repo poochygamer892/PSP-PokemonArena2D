@@ -12,6 +12,7 @@
 
 PSP_MODULE_INFO("PokemonArena2D", 0, 0, 1);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
+PSP_HEAP_SIZE_KB(4096);
 
 #define SCREEN_W 480
 #define SCREEN_H 272
@@ -24,6 +25,8 @@ PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 #define SPRITE_ANIMATION_FRAMES 12
 #define SPRITE_ATLAS_W (SPRITE_SIDE * SPRITE_ATLAS_SIDE)
 #define SPRITE_ATLAS_H (SPRITE_SIDE * SPRITE_ATLAS_SIDE)
+#define SPRITE_ANIMATION_BYTES (ROSTER_SIZE * SPRITE_ANIMATION_FRAMES * \
+                                SPRITE_SIDE * SPRITE_SIDE * sizeof(uint16_t))
 #define ARENA_LEFT 22.0f
 #define ARENA_RIGHT 458.0f
 #define ARENA_TOP 78.0f
@@ -196,8 +199,7 @@ static const uint8_t story_arenas[16] = {
 
 static uint16_t framebuffers[2][BUFFER_W * SCREEN_H] __attribute__((aligned(64)));
 static uint16_t sprite_atlas[SPRITE_ATLAS_W * SPRITE_ATLAS_H] __attribute__((aligned(64)));
-static uint16_t sprite_animations[ROSTER_SIZE * SPRITE_ANIMATION_FRAMES *
-                                  SPRITE_SIDE * SPRITE_SIDE] __attribute__((aligned(64)));
+static uint16_t *sprite_animations;
 static int sprites_loaded, animations_loaded;
 static uint16_t *draw_buffer, *display_buffer;
 static Projectile projectiles[MAX_PROJECTILES];
@@ -367,7 +369,14 @@ static void load_sprite_atlas(void) {
     const char *atlas_path = "ms0:/PSP/GAME/PokemonArena2D/assets/pokemon_atlas.rgb565";
     const char *animation_path = "ms0:/PSP/GAME/PokemonArena2D/assets/pokemon_animations.rgb565";
     sprites_loaded = read_sprite_asset(atlas_path, sprite_atlas, sizeof(sprite_atlas));
-    animations_loaded = read_sprite_asset(animation_path, sprite_animations, sizeof(sprite_animations));
+    sprite_animations = (uint16_t *)malloc(SPRITE_ANIMATION_BYTES);
+    if (sprite_animations)
+        animations_loaded = read_sprite_asset(animation_path, sprite_animations,
+                                              (int)SPRITE_ANIMATION_BYTES);
+    if (!animations_loaded && sprite_animations) {
+        free(sprite_animations);
+        sprite_animations = NULL;
+    }
 }
 
 static const Species *get_species(int id) {
