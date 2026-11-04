@@ -2,7 +2,10 @@
 
 An independent native homebrew adaptation for the PSP, based on the general
 real-time arena concept of [Poke2D Arena](https://poke2darena.com/). It does not
-run the website or its Phaser code. It uses original PSP menus and arenas, plus
+run the website or its Phaser code. The project was also originally described
+as based on [Empress: Pokémon 2D Arena](https://omniscye.itch.io/empress-pokemon-2d-arena);
+that Windows/Unity game and the Poke2D Arena website are separate references.
+It uses original PSP menus and arenas, plus
 community-contributed Pokémon fan sprites credited in
 [`assets/SPRITE_CREDITS.md`](assets/SPRITE_CREDITS.md).
 
@@ -14,38 +17,52 @@ holders. This is an unofficial fan project.
 
 ## Playable modes
 
-- **Quick Battle:** random three-member teams against the CPU.
-- **VS CPU:** three saved team slots, selectable arena, and Easy, Normal, or
-  Hard CPU difficulty.
+- **Quick Battle:** two Pikachu training duels, then random three-member teams
+  against the CPU.
+- **VS CPU:** choose among three saved teams, edit each three-Pokémon lineup,
+  and select the arena and Easy, Normal, or Hard CPU difficulty.
 - **Story:** 16 original one-on-one challenges across four chapters, with
   saved progress and a selectable starter.
-- **Team Builder:** edit the three Pokémon in each of three saved teams.
+- **Team Builder:** browse the 25-Pokémon roster with sprite previews, choose a
+  party slot, and save three lineups. Each Pokémon has its own named skill,
+  utility move, and ultimate. VS CPU lets you pick the saved team, stage, and
+  CPU level before entering the editor or starting the match.
 - **Settings:** CPU difficulty, default arena, reduced flashes, and Story
   starter.
-- **Battle:** six arenas, 25 Pokémon, all 18 type matchups, basic attack,
-  skill, Protect, dash, ultimate, switching, status effects, and timed supplies.
+- **Battle:** six arenas, all 18 type matchups, per-species Idle/Walk/Attack
+  sprite animations, type-colored attacks, timed skills, Protect, dash,
+  ultimate charge, three-member teams, switching, burn/poison/paralysis/sleep,
+  boosts, and timed supplies.
 
 This is an offline PSP build. The web edition's online rooms, three-player
-brawl, full 1,066-entry roster, and move editor are not implemented here.
+brawl, full roster and custom move editor are not included. The PSP uses 25
+independently sourced Pokémon sprites and original PSP attack effects; it does
+not bundle or copy the web game's artwork or animation files.
 
 ## PSP controls
 
 - Analog stick or D-pad: move
 - Hold **L** + D-pad: aim
 - **Cross:** basic attack
-- **Square:** skill; **L + Square:** Protect
+- **Square:** species skill
+- **L + Circle:** species utility/heavy move
+- **L + Square:** Protect
 - **Circle:** dash
 - **Triangle:** ultimate
 - **R:** switch to the next available teammate
+- **R + Cross / Square / Circle:** select party slot 1 / 2 / 3
 - **Start:** pause; **Select:** exit
 
 In menus, use the D-pad, **Cross** to select, and **Circle** to go back. In the
-Team Builder, **Up/Down** chooses a Pokémon, **Left/Right** selects a team,
-**L/R** changes the party slot, and **Cross** saves it.
+Team Builder, the D-pad browses the visible roster grid, **Cross** assigns the
+previewed Pokémon, **L/R** changes the party slot, and **Square** cycles among
+saved teams. The VS CPU setup also opens the team editor before battle.
 
-Save data is written to `ms0:/PSP/SAVEDATA/POKE2D/`. The sprite atlas is read
-from `ms0:/PSP/GAME/PokemonArena2D/assets/pokemon_atlas.rgb565`; keep the
-`assets` folder beside `EBOOT.PBP` when installing.
+Save data is written to `ms0:/PSP/SAVEDATA/POKE2D/`. The static sprite atlas
+and animated sprite atlas are read from
+`ms0:/PSP/GAME/PokemonArena2D/assets/`; keep both
+`pokemon_atlas.rgb565` and `pokemon_animations.rgb565` in the `assets`
+folder beside `EBOOT.PBP` when installing.
 
 ## Build and install
 
@@ -56,9 +73,10 @@ to the root of the Memory Stick, then launch it under **Game → Memory Stick**.
 `PSP_LARGE_MEMORY=0`; the build does not request the PSP-2000 extended-memory
 mode and targets PSP-1000.
 
-To rebuild the atlas, run `sh tools/build_sprite_atlas.sh` (requires `curl`,
-ImageMagick, and `ffmpeg`). The script uses the pinned upstream commit listed
-in `assets/SPRITE_CREDITS.md` and emits the RGB565 asset expected by the game.
+To rebuild the atlases, run `sh tools/build_sprite_atlas.sh` (requires Python 3
+and Pillow). The script uses the pinned upstream commit listed in
+`assets/SPRITE_CREDITS.md`; set `SPRITECOLLAB_SOURCE_DIR` to local source
+images to rebuild without network access.
 
 ## Reference notes
 

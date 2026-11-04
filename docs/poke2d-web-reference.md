@@ -20,22 +20,25 @@ only.
 - Team modes use three Pokémon per side, with one active fighter and two on the
   bench. The surviving teammate takes over when the active Pokémon faints.
 - Story Mode is one-on-one and has four chapters with sixteen challenges.
-- Quick Battle, Vs CPU and Online use teams. Vs CPU has Easy, Normal and Hard.
-- The current web edition also describes two-player Online rooms and a
-  three-player Free-for-All mode.
+- Quick Battle begins with two Pikachu training duels, then uses independent
+  random 3v3 teams. Vs CPU has Easy, Normal and Hard and uses a saved team.
+- Your Teams and the Vs CPU picker select a three-Pokémon party from the
+  website's 1,066-entry roster and support per-Pokémon move editing.
+- The current web edition also has two-player Online rooms and a three-player
+  Free-for-All mode.
 - It has 18 Pokémon types and six arenas: Grass, Forest, Seaside, Volcanic, Ice
   and Ruins.
 
-For a PSP-1000 first release, prioritize an offline Vs CPU battle. Online rooms,
-browser persistence, team editing, the full roster and Story Mode progression
-are later features.
+The PSP build is offline. Its compact 25-Pokémon picker, saved teams and move
+sets are PSP-side implementations; it does not include the browser's full
+roster or freeform move editor.
 
 ## Controls and combat reference
 
 Desktop movement uses WASD or arrow keys, while the mouse aims. The five battle
-actions are basic attack (left mouse), skill (right mouse), mobility (Space),
-utility (Q), and ultimate (E). R cycles to the next healthy teammate; 1, 2 and
-3 select party slots directly.
+slots are basic attack (left mouse), skill (right mouse), mobility (Space),
+utility (Q), and ultimate (E). Each Pokémon has a distinct preset moveset. R
+cycles to the next healthy teammate; 1, 2 and 3 select party slots directly.
 
 The published guides describe these rules:
 
@@ -66,21 +69,28 @@ ultimate charge, statuses, supplies and timeout scoring. These browser-pixel
 distances and timings should be translated to PSP screen and frame values,
 rather than copied as raw browser coordinates.
 
-## PSP mapping proposal
-
-This is a port-side proposal, not a control mapping from the website:
+## Current PSP controls and port
 
 - Analog stick or D-pad: move
 - Cross: basic attack
-- Square: regular skill
+- Square: species skill
 - Circle: dash
+- L + Circle: species utility/heavy move
+- L + Square: Protect guard
 - Triangle: ultimate
-- L: utility skill
 - R: switch to the next healthy teammate
+- R + Cross / Square / Circle: select party slot 1 / 2 / 3 directly
 
-The first combat slice should use one active fighter per side, a three-member
-party, basic attack, one regular skill, dash, switching, HP, KO replacement and
-a CPU opponent. Use a fixed 60 Hz simulation and keep it separate from drawing.
+The current PSP build has team selection and combat for a 25-Pokémon roster,
+named skills and utility moves, 18-type matchups, switch/KO replacement, timed
+supplies, a CPU opponent, and Idle/Walk/Attack animation cels from the credited
+community sprite sheets. Network rooms, the 1,066-entry browser roster, and its
+freeform move editor are not implemented.
+
+REA's Playwright capture was attempted against both the live game URL and the
+home page, but Chromium navigation failed before an initial page state could be
+captured. The feature and control notes above come from the site's published
+guides, not a live runtime trace or pixel comparison.
 
 ## Assets and attribution
 

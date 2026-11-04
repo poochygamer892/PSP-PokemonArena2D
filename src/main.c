@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <pspctrl.h>
@@ -18,14 +19,15 @@ PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 #define TEAM_SIZE 3
 #define ROSTER_SIZE 25
 #define MAX_PROJECTILES 24
-#define SPRITE_SIDE 48
+#define SPRITE_SIDE 64
 #define SPRITE_ATLAS_SIDE 5
+#define SPRITE_ANIMATION_FRAMES 12
 #define SPRITE_ATLAS_W (SPRITE_SIDE * SPRITE_ATLAS_SIDE)
 #define SPRITE_ATLAS_H (SPRITE_SIDE * SPRITE_ATLAS_SIDE)
 #define ARENA_LEFT 22.0f
 #define ARENA_RIGHT 458.0f
-#define ARENA_TOP 48.0f
-#define ARENA_BOTTOM 244.0f
+#define ARENA_TOP 78.0f
+#define ARENA_BOTTOM 216.0f
 #define SAVE_DIR "ms0:/PSP/SAVEDATA/POKE2D"
 #define SAVE_FILE SAVE_DIR "/save.dat"
 
@@ -45,6 +47,10 @@ typedef enum {
 typedef enum { MODE_QUICK, MODE_VS_CPU, MODE_STORY } BattleMode;
 
 typedef enum { SUPPLY_NONE, SUPPLY_HEAL, SUPPLY_ULTIMATE, SUPPLY_SPEED } SupplyKind;
+typedef enum {
+    EFFECT_NONE, EFFECT_BURN, EFFECT_POISON, EFFECT_PARALYSIS,
+    EFFECT_SLEEP, EFFECT_BOOST, EFFECT_HEAL
+} MoveEffect;
 
 typedef struct {
     const char *name;
@@ -57,11 +63,21 @@ typedef struct {
 } Species;
 
 typedef struct {
+    const char *skill_name, *utility_name, *ultimate_name;
+    Type skill_type, utility_type, ultimate_type;
+    uint8_t skill_power, utility_power, ultimate_power;
+    uint16_t utility_cooldown;
+    uint8_t utility_effect;
+} MoveSet;
+
+typedef struct {
     float x, y, aim_x, aim_y, knock_x, knock_y;
     int species, hp, max_hp;
-    int basic_cd, skill_cd, dash_cd, protect_cd, protect_frames;
+    int basic_cd, skill_cd, utility_cd, dash_cd, protect_cd, protect_frames;
     int invulnerable, flash, ultimate, cast_frames, cast_damage;
-    int burn_frames, burn_tick, paralysis_frames, sleep_frames, speed_frames;
+    int burn_frames, burn_tick, poison_frames, poison_tick;
+    int paralysis_frames, sleep_frames, speed_frames;
+    int attack_frames, attack_kind, anim_phase, moving, boost_frames;
 } Fighter;
 
 typedef struct {
@@ -72,8 +88,8 @@ typedef struct {
 } Team;
 
 typedef struct {
-    float x, y, vx, vy;
-    int damage, life, owner, active, heavy;
+    float x, y, prev_x, prev_y, vx, vy;
+    int damage, life, owner, active, heavy, age, effect;
     Type type;
 } Projectile;
 
@@ -88,7 +104,7 @@ typedef struct {
     uint16_t version;
     uint8_t teams[3][TEAM_SIZE];
     uint8_t selected_team, arena, difficulty, reduced_flash;
-    uint8_t story_progress, story_species;
+    uint8_t story_progress, story_species, quick_wins;
 } SaveData;
 
 static const char *type_names[TYPE_COUNT] = {
@@ -126,6 +142,35 @@ static const Species roster[ROSTER_SIZE] = {
     {"VICTINI",    TYPE_FIRE,     TYPE_PSYCHIC,230, 105,  55, 0, 11, 192}
 };
 
+/* Per-species combat loadouts: one skill, a heavy utility and an ultimate. */
+static const MoveSet move_sets[ROSTER_SIZE] = {
+    {"THUNDERBOLT", "THUNDER WAVE", "THUNDERSTORM", TYPE_ELECTRIC, TYPE_ELECTRIC, TYPE_ELECTRIC, 10, 12, 25, 300, EFFECT_PARALYSIS},
+    {"FLAMETHROWER", "FLARE BLITZ", "BLAST BURN", TYPE_FIRE, TYPE_FIRE, TYPE_FIRE, 11, 16, 27, 330, EFFECT_BURN},
+    {"MUD SHOT", "EARTHQUAKE", "HYDRO CANNON", TYPE_GROUND, TYPE_GROUND, TYPE_WATER, 10, 15, 27, 300, EFFECT_NONE},
+    {"LEAF BLADE", "QUICK ATTACK", "LEAF STORM", TYPE_GRASS, TYPE_NORMAL, TYPE_GRASS, 9, 13, 24, 270, EFFECT_NONE},
+    {"BRICK BREAK", "CLOSE COMBAT", "CROSS CHOP", TYPE_FIGHTING, TYPE_FIGHTING, TYPE_FIGHTING, 11, 16, 27, 330, EFFECT_NONE},
+    {"ROCK SLIDE", "EARTHQUAKE", "STONE EDGE", TYPE_ROCK, TYPE_GROUND, TYPE_ROCK, 10, 15, 27, 300, EFFECT_NONE},
+    {"WATERFALL", "HURRICANE", "HYDRO PUMP", TYPE_WATER, TYPE_FLYING, TYPE_WATER, 12, 16, 28, 330, EFFECT_NONE},
+    {"PSYBEAM", "CALM MIND", "PSYCHIC", TYPE_PSYCHIC, TYPE_PSYCHIC, TYPE_PSYCHIC, 11, 0, 27, 300, EFFECT_BOOST},
+    {"BUG BUZZ", "SLEEP POWDER", "BUG BOMB", TYPE_BUG, TYPE_GRASS, TYPE_BUG, 9, 12, 24, 270, EFFECT_SLEEP},
+    {"ROCK BLAST", "EARTHQUAKE", "STONE EDGE", TYPE_ROCK, TYPE_GROUND, TYPE_ROCK, 12, 17, 29, 330, EFFECT_NONE},
+    {"SHADOW BALL", "HYPNOSIS", "SHADOW BLAST", TYPE_GHOST, TYPE_PSYCHIC, TYPE_GHOST, 11, 12, 27, 270, EFFECT_SLEEP},
+    {"DRAGON CLAW", "HURRICANE", "DRACO METEOR", TYPE_DRAGON, TYPE_FLYING, TYPE_DRAGON, 12, 17, 29, 330, EFFECT_NONE},
+    {"DARK PULSE", "TOXIC", "FOUL PLAY", TYPE_DARK, TYPE_POISON, TYPE_DARK, 9, 12, 25, 300, EFFECT_POISON},
+    {"IRON TAIL", "EARTHQUAKE", "HEAVY SLAM", TYPE_STEEL, TYPE_GROUND, TYPE_STEEL, 10, 15, 27, 300, EFFECT_NONE},
+    {"PSYCHIC", "CALM MIND", "MOONBLAST", TYPE_PSYCHIC, TYPE_PSYCHIC, TYPE_FAIRY, 11, 0, 27, 300, EFFECT_BOOST},
+    {"ICE BEAM", "AURORA VEIL", "BLIZZARD", TYPE_ICE, TYPE_ICE, TYPE_ICE, 10, 13, 27, 300, EFFECT_BOOST},
+    {"THUNDERBOLT", "WILL O WISP", "VOLT SWITCH", TYPE_ELECTRIC, TYPE_FIRE, TYPE_ELECTRIC, 10, 12, 26, 300, EFFECT_BURN},
+    {"AURA SPHERE", "SWORDS DANCE", "CLOSE COMBAT", TYPE_FIGHTING, TYPE_FIGHTING, TYPE_FIGHTING, 11, 0, 28, 300, EFFECT_BOOST},
+    {"NIGHT DAZE", "NASTY PLOT", "NIGHT SLASH", TYPE_DARK, TYPE_DARK, TYPE_DARK, 10, 0, 26, 300, EFFECT_BOOST},
+    {"LEAF BLADE", "SWORDS DANCE", "LEAF STORM", TYPE_GRASS, TYPE_GRASS, TYPE_GRASS, 10, 0, 27, 300, EFFECT_BOOST},
+    {"FREEZE DRY", "ICE SHARD", "ICE BEAM", TYPE_ICE, TYPE_ICE, TYPE_ICE, 10, 14, 26, 300, EFFECT_NONE},
+    {"ICICLE CRASH", "EARTHQUAKE", "AVALANCHE", TYPE_ICE, TYPE_GROUND, TYPE_ICE, 11, 16, 28, 330, EFFECT_NONE},
+    {"BRAVE BIRD", "FLARE BLITZ", "FLAME CHARGE", TYPE_FLYING, TYPE_FIRE, TYPE_FIRE, 12, 17, 29, 330, EFFECT_BURN},
+    {"PSYSTRIKE", "CALM MIND", "PSYSTRIKE", TYPE_PSYCHIC, TYPE_PSYCHIC, TYPE_PSYCHIC, 12, 0, 30, 330, EFFECT_BOOST},
+    {"V CREATE", "ZEN HEADBUTT", "SEARING SHOT", TYPE_FIRE, TYPE_PSYCHIC, TYPE_FIRE, 11, 16, 29, 330, EFFECT_NONE}
+};
+
 static const char *arena_names[6] = {
     "GRASS", "FOREST", "SEASIDE", "VOLCANIC", "ICE", "RUINS"
 };
@@ -151,7 +196,9 @@ static const uint8_t story_arenas[16] = {
 
 static uint16_t framebuffers[2][BUFFER_W * SCREEN_H] __attribute__((aligned(64)));
 static uint16_t sprite_atlas[SPRITE_ATLAS_W * SPRITE_ATLAS_H] __attribute__((aligned(64)));
-static int sprites_loaded;
+static uint16_t sprite_animations[ROSTER_SIZE * SPRITE_ANIMATION_FRAMES *
+                                  SPRITE_SIDE * SPRITE_SIDE] __attribute__((aligned(64)));
+static int sprites_loaded, animations_loaded;
 static uint16_t *draw_buffer, *display_buffer;
 static Projectile projectiles[MAX_PROJECTILES];
 static Supply supply;
@@ -165,6 +212,7 @@ static int story_stage, settings_cursor, pause_cursor;
 static int match_frames, match_finished, player_won, ai_reaction;
 static int supply_warning, next_supply_frame;
 static int vs_setup_cursor, story_cursor;
+static Screen team_return_screen = SCREEN_MENU;
 static uint32_t rng_state = 0x2d5a19b3u;
 
 static const uint8_t font3x5[36][5] = {
@@ -274,12 +322,16 @@ static void load_game(void) {
     if (fd >= 0) {
         int bytes = sceIoRead(fd, &save_data, sizeof(save_data));
         sceIoClose(fd);
-        if (bytes == sizeof(save_data) && save_data.magic == 0x504f4b32u && save_data.version == 1) {
+        if (bytes == sizeof(save_data) && save_data.magic == 0x504f4b32u &&
+            (save_data.version == 1 || save_data.version == 2)) {
+            if (save_data.version == 1) save_data.quick_wins = 0;
+            save_data.version = 2;
             if (save_data.selected_team > 2) save_data.selected_team = 0;
             if (save_data.arena > 5) save_data.arena = 0;
             if (save_data.difficulty > 2) save_data.difficulty = 1;
             if (save_data.story_progress > 16) save_data.story_progress = 16;
             if (save_data.story_species >= ROSTER_SIZE) save_data.story_species = 0;
+            if (save_data.quick_wins > 2) save_data.quick_wins = 0;
             for (int t = 0; t < 3; ++t)
                 for (int s = 0; s < TEAM_SIZE; ++s)
                     if (save_data.teams[t][s] >= ROSTER_SIZE) save_data.teams[t][s] = 0;
@@ -288,7 +340,7 @@ static void load_game(void) {
     }
     memset(&save_data, 0, sizeof(save_data));
     save_data.magic = 0x504f4b32u;
-    save_data.version = 1;
+    save_data.version = 2;
     save_data.teams[0][0] = 0; save_data.teams[0][1] = 3; save_data.teams[0][2] = 2;
     save_data.teams[1][0] = 18; save_data.teams[1][1] = 14; save_data.teams[1][2] = 6;
     save_data.teams[2][0] = 10; save_data.teams[2][1] = 15; save_data.teams[2][2] = 17;
@@ -297,18 +349,35 @@ static void load_game(void) {
     save_data.story_species = 0;
 }
 
-static void load_sprite_atlas(void) {
-    const char *path = "ms0:/PSP/GAME/PokemonArena2D/assets/pokemon_atlas.rgb565";
+static int read_sprite_asset(const char *path, uint16_t *destination, int expected_size) {
     SceUID fd = sceIoOpen(path, PSP_O_RDONLY, 0777);
-    if (fd < 0) return;
-    int bytes = sceIoRead(fd, sprite_atlas, sizeof(sprite_atlas));
+    if (fd < 0) return 0;
+    int total = 0;
+    while (total < expected_size) {
+        int bytes = sceIoRead(fd, (uint8_t *)destination + total, expected_size - total);
+        if (bytes <= 0) break;
+        total += bytes;
+    }
     sceIoClose(fd);
-    sprites_loaded = bytes == (int)sizeof(sprite_atlas);
+    if (total != expected_size) memset(destination, 0, expected_size);
+    return total == expected_size;
+}
+
+static void load_sprite_atlas(void) {
+    const char *atlas_path = "ms0:/PSP/GAME/PokemonArena2D/assets/pokemon_atlas.rgb565";
+    const char *animation_path = "ms0:/PSP/GAME/PokemonArena2D/assets/pokemon_animations.rgb565";
+    sprites_loaded = read_sprite_asset(atlas_path, sprite_atlas, sizeof(sprite_atlas));
+    animations_loaded = read_sprite_asset(animation_path, sprite_animations, sizeof(sprite_animations));
 }
 
 static const Species *get_species(int id) {
     if (id < 0 || id >= ROSTER_SIZE) id = 0;
     return &roster[id];
+}
+
+static const MoveSet *get_moveset(int id) {
+    if (id < 0 || id >= ROSTER_SIZE) id = 0;
+    return &move_sets[id];
 }
 
 static void init_fighter(Fighter *f, int species_id) {
@@ -447,9 +516,11 @@ static int calculate_damage(int base, Type attack, const Fighter *attacker,
     mult = mult * type_factor(attack, d->primary) / 2;
     if (d->secondary != TYPE_NONE) mult = mult * type_factor(attack, d->secondary) / 2;
     if (attack == a->primary || attack == a->secondary) mult = mult * 3 / 2;
+    if (attacker->boost_frames > 0) base = base * 5 / 4;
     int damage = base * mult / 4;
     if (basic && mult == 0) damage = base / 2;
-    if (damage < 1 && base > 0) damage = 1;
+    if (mult == 0 && !basic) return 0;
+    if (damage < 1 && base > 0 && mult > 0) damage = 1;
     return damage;
 }
 
@@ -461,20 +532,26 @@ static void gain_ultimate(Fighter *f, int damage) {
 }
 
 static int apply_damage(Fighter *target, Fighter *attacker, int base, Type type,
-                        int basic, float from_x, float from_y) {
+                        int basic, float from_x, float from_y, int effect) {
     if (target->hp <= 0 || target->invulnerable > 0 || target->protect_frames > 0)
         return 0;
     int damage = calculate_damage(base, type, attacker, target, basic);
+    if (damage <= 0) return 0;
     if (damage > target->hp) damage = target->hp;
     target->hp -= damage;
     if (!basic && damage > 0) {
-        if (type == TYPE_FIRE && random_range(4) == 0) {
+        if (effect == EFFECT_BURN || (effect == EFFECT_NONE && type == TYPE_FIRE && random_range(4) == 0)) {
             target->burn_frames = 1200;
             target->burn_tick = 240;
-        } else if (type == TYPE_ELECTRIC && random_range(4) == 0) {
+        } else if (effect == EFFECT_POISON || (effect == EFFECT_NONE && type == TYPE_POISON && random_range(4) == 0)) {
+            target->poison_frames = 1200;
+            target->poison_tick = 240;
+        } else if (effect == EFFECT_PARALYSIS || (effect == EFFECT_NONE && type == TYPE_ELECTRIC && random_range(4) == 0)) {
             target->paralysis_frames = 180;
-        } else if (type == TYPE_PSYCHIC && random_range(5) == 0) {
-            target->sleep_frames = 96;
+        } else if (effect == EFFECT_NONE && type == TYPE_ICE && random_range(4) == 0) {
+            target->paralysis_frames = 180;
+        } else if (effect == EFFECT_SLEEP || (effect == EFFECT_NONE && type == TYPE_PSYCHIC && random_range(5) == 0)) {
+            target->sleep_frames = 168;
         }
     }
     target->flash = 7;
@@ -517,12 +594,24 @@ static void start_match(BattleMode mode) {
     memset(&supply, 0, sizeof(supply));
     uint8_t cpu_ids[TEAM_SIZE];
     if (mode == MODE_QUICK) {
-        uint8_t player_ids[TEAM_SIZE];
-        random_team(player_ids, 1);
-        random_team(cpu_ids, 1);
-        init_team(&player_team, player_ids, TEAM_SIZE);
-        init_team(&cpu_team, cpu_ids, TEAM_SIZE);
-        save_data.arena = (uint8_t)random_range(6);
+        if (save_data.quick_wins < 2) {
+            uint8_t player_ids[TEAM_SIZE] = {0, 0, 0};
+            uint8_t training_opponents[2] = {6, 1};
+            cpu_ids[0] = training_opponents[save_data.quick_wins];
+            cpu_ids[1] = cpu_ids[2] = 0;
+            init_team(&player_team, player_ids, 1);
+            init_team(&cpu_team, cpu_ids, 1);
+            save_data.difficulty = 0;
+            save_data.arena = save_data.quick_wins == 0 ? 2 : 0;
+        } else {
+            uint8_t player_ids[TEAM_SIZE];
+            random_team(player_ids, 1);
+            random_team(cpu_ids, 1);
+            init_team(&player_team, player_ids, TEAM_SIZE);
+            init_team(&cpu_team, cpu_ids, TEAM_SIZE);
+            save_data.difficulty = 1;
+            save_data.arena = (uint8_t)random_range(6);
+        }
     } else if (mode == MODE_STORY) {
         uint8_t player_ids[TEAM_SIZE] = {save_data.story_species, 0, 0};
         uint8_t enemy_ids[TEAM_SIZE] = {story_opponents[story_stage], 0, 0};
@@ -560,10 +649,14 @@ static void finish_match(int player_wins) {
         if (save_data.story_progress > 16) save_data.story_progress = 16;
         save_game();
     }
+    if (battle_mode == MODE_QUICK && player_wins && save_data.quick_wins < 2) {
+        ++save_data.quick_wins;
+        save_game();
+    }
 }
 
 static void launch_projectile(int owner, Fighter *f, int damage, Type type,
-                              float speed, int life, int heavy) {
+                              float speed, int life, int heavy, int effect) {
     for (int i = 0; i < MAX_PROJECTILES; ++i) {
         Projectile *p = &projectiles[i];
         if (p->active) continue;
@@ -571,9 +664,10 @@ static void launch_projectile(int owner, Fighter *f, int damage, Type type,
         normalize(&ax, &ay);
         p->x = f->x + ax * 16.0f;
         p->y = f->y + ay * 16.0f;
+        p->prev_x = p->x; p->prev_y = p->y;
         p->vx = ax * speed; p->vy = ay * speed;
         p->damage = damage; p->life = life;
-        p->owner = owner; p->type = type;
+        p->owner = owner; p->type = type; p->age = 0; p->effect = effect;
         p->heavy = heavy; p->active = 1;
         return;
     }
@@ -583,6 +677,7 @@ static void schedule_team_switch(Team *team, int target, int manual) {
     if (target < 0 || target >= team->count || team->members[target].hp <= 0) return;
     Fighter *outgoing = active_fighter(team);
     if (outgoing->cast_frames > 0) outgoing->cast_frames = 0;
+    outgoing->boost_frames = 0;
     team->switch_target = target;
     team->switch_delay = manual ? 48 : 47;
     if (manual) team->switch_cd = 210;
@@ -594,6 +689,14 @@ static void try_manual_switch(Team *team) {
     if (f->cast_frames > 0) return;
     int target = next_alive(team, team->active);
     if (target >= 0) schedule_team_switch(team, target, 1);
+}
+
+static void try_manual_switch_to(Team *team, int target) {
+    if (team->switch_cd > 0 || team->switch_delay > 0 || target == team->active)
+        return;
+    Fighter *f = active_fighter(team);
+    if (f->cast_frames > 0) return;
+    schedule_team_switch(team, target, 1);
 }
 
 static void update_team_state(Team *team) {
@@ -619,11 +722,13 @@ static void update_team_state(Team *team) {
 static void update_fighter_timers(Fighter *f) {
     if (f->basic_cd > 0) --f->basic_cd;
     if (f->skill_cd > 0) --f->skill_cd;
+    if (f->utility_cd > 0) --f->utility_cd;
     if (f->dash_cd > 0) --f->dash_cd;
     if (f->protect_cd > 0) --f->protect_cd;
     if (f->protect_frames > 0) --f->protect_frames;
     if (f->invulnerable > 0) --f->invulnerable;
     if (f->flash > 0) --f->flash;
+    if (f->attack_frames > 0) --f->attack_frames;
     if (f->burn_frames > 0) {
         --f->burn_frames;
         if (f->burn_tick > 0) --f->burn_tick;
@@ -633,9 +738,19 @@ static void update_fighter_timers(Fighter *f) {
             f->burn_tick = 240;
         }
     }
+    if (f->poison_frames > 0) {
+        --f->poison_frames;
+        if (f->poison_tick > 0) --f->poison_tick;
+        if (f->poison_tick == 0 && f->hp > 0) {
+            int poison = f->hp < 2 ? f->hp : 2;
+            f->hp -= poison;
+            f->poison_tick = 240;
+        }
+    }
     if (f->paralysis_frames > 0) --f->paralysis_frames;
     if (f->sleep_frames > 0) --f->sleep_frames;
     if (f->speed_frames > 0) --f->speed_frames;
+    if (f->boost_frames > 0) --f->boost_frames;
 }
 
 static void keep_in_arena(Fighter *f) {
@@ -654,15 +769,17 @@ static void do_basic_attack(int side) {
     float dx = target->x - f->x, dy = target->y - f->y;
     float dist = length2(dx, dy);
     if (dist > 0.01f) { f->aim_x = dx / dist; f->aim_y = dy / dist; }
+    f->attack_frames = 8;
+    f->attack_kind = 1;
     if (sp->physical) {
         if (dist < 42.0f) {
             f->x += f->aim_x * 10.0f;
             f->y += f->aim_y * 10.0f;
             keep_in_arena(f);
-            apply_damage(target, f, 3, type, 1, f->x, f->y);
+            apply_damage(target, f, 3, type, 1, f->x, f->y, EFFECT_NONE);
         }
     } else {
-        launch_projectile(side, f, 2, type, 7.0f, 54, 0);
+        launch_projectile(side, f, 2, type, 7.0f, 54, 0, EFFECT_NONE);
     }
     f->basic_cd = 30;
 }
@@ -672,24 +789,45 @@ static void do_skill(int side) {
     Fighter *f = active_fighter(team);
     if (f->skill_cd > 0 || f->hp <= 0 || f->sleep_frames > 0 || team->switch_delay > 0) return;
     const Species *sp = get_species(f->species);
-    Type type = sp->secondary != TYPE_NONE ? sp->secondary : sp->primary;
-    int target_id = side == 0 ? cpu_team.active : player_team.active;
+    const MoveSet *moves = get_moveset(f->species);
     Fighter *target = side == 0 ? current_cpu() : current_player();
     float dx = target->x - f->x, dy = target->y - f->y;
     float dist = length2(dx, dy);
     if (dist > 0.01f) { f->aim_x = dx / dist; f->aim_y = dy / dist; }
-    (void)target_id;
-    launch_projectile(side, f, sp->skill_power, type, 4.4f, 64, 0);
+    launch_projectile(side, f, moves->skill_power ? moves->skill_power : sp->skill_power,
+                      moves->skill_type, 5.0f, 72, 0, EFFECT_NONE);
     f->skill_cd = sp->skill_cooldown;
+    f->attack_frames = 14;
+    f->attack_kind = 2;
 }
 
 static void do_utility(int side) {
     Team *team = side == 0 ? &player_team : &cpu_team;
     Fighter *f = active_fighter(team);
+    if (f->utility_cd > 0 || f->hp <= 0 || f->sleep_frames > 0 || team->switch_delay > 0) return;
+    const MoveSet *moves = get_moveset(f->species);
+    if (moves->utility_effect == EFFECT_BOOST) {
+        f->boost_frames = 480;
+    } else if (moves->utility_effect == EFFECT_HEAL) {
+        f->hp += 20;
+        if (f->hp > f->max_hp) f->hp = f->max_hp;
+    } else {
+        int damage = moves->utility_power ? moves->utility_power : 2;
+        launch_projectile(side, f, damage, moves->utility_type, 3.6f, 82, 1, moves->utility_effect);
+    }
+    f->utility_cd = moves->utility_cooldown;
+    f->attack_frames = 18;
+    f->attack_kind = 3;
+}
+
+static void do_protect(Team *team) {
+    Fighter *f = active_fighter(team);
     if (f->protect_cd > 0 || f->hp <= 0 || f->sleep_frames > 0 || team->switch_delay > 0) return;
     f->protect_frames = 72;
     f->protect_cd = 270;
     if (f->cast_frames > 0) f->cast_frames = 0;
+    f->attack_frames = 10;
+    f->attack_kind = 4;
 }
 
 static void do_dash(Team *team, float dx, float dy) {
@@ -702,6 +840,8 @@ static void do_dash(Team *team, float dx, float dy) {
     f->dash_cd = 150;
     f->invulnerable = 18;
     f->cast_frames = 0;
+    f->attack_frames = 8;
+    f->attack_kind = 5;
 }
 
 static void begin_ultimate(Team *team) {
@@ -709,7 +849,9 @@ static void begin_ultimate(Team *team) {
     if (f->ultimate < 100 || f->cast_frames > 0 || f->hp <= 0 ||
         f->sleep_frames > 0 || team->switch_delay > 0) return;
     f->cast_frames = 42;
-    f->cast_damage = 18;
+    f->cast_damage = get_moveset(f->species)->ultimate_power;
+    f->attack_frames = 42;
+    f->attack_kind = 6;
 }
 
 static void update_ultimates(void) {
@@ -724,8 +866,8 @@ static void update_ultimates(void) {
         }
         --f->cast_frames;
         if (f->cast_frames == 0) {
-            Type type = get_species(f->species)->primary;
-            launch_projectile(side, f, f->cast_damage, type, 3.5f, 90, 1);
+            Type type = get_moveset(f->species)->ultimate_type;
+            launch_projectile(side, f, f->cast_damage, type, 3.5f, 100, 1, EFFECT_NONE);
             f->ultimate = 0;
         }
     }
@@ -738,6 +880,7 @@ static void update_player(const SceCtrlData *pad) {
     if (player_team.switch_delay > 0 || f->hp <= 0 || f->sleep_frames > 0) return;
 
     float dx = 0.0f, dy = 0.0f;
+    f->moving = 0;
     int ax = (int)pad->Lx - 128, ay = (int)pad->Ly - 128;
     int aim_mode = (pad->Buttons & PSP_CTRL_LTRIGGER) != 0;
     if (aim_mode) {
@@ -753,6 +896,8 @@ static void update_player(const SceCtrlData *pad) {
         if (pad->Buttons & PSP_CTRL_UP) dy -= 1.0f;
         if (pad->Buttons & PSP_CTRL_DOWN) dy += 1.0f;
         if (length2(dx, dy) > 1.0f) normalize(&dx, &dy);
+        f->moving = length2(dx, dy) > 0.1f;
+        if (f->moving) ++f->anim_phase;
         float speed = f->speed_frames > 0 ? 2.6f : 2.0f;
         if (f->paralysis_frames > 0) speed *= 0.5f;
         f->x += dx * speed; f->y += dy * speed;
@@ -762,14 +907,26 @@ static void update_player(const SceCtrlData *pad) {
     f->knock_x *= 0.80f; f->knock_y *= 0.80f;
     keep_in_arena(f);
 
-    if (pressed(pad->Buttons, PSP_CTRL_RTRIGGER)) try_manual_switch(&player_team);
-    if (pad->Buttons & PSP_CTRL_CROSS) do_basic_attack(0);
-    if (pressed(pad->Buttons, PSP_CTRL_SQUARE)) {
-        if (pad->Buttons & PSP_CTRL_LTRIGGER) do_utility(0);
+    int switch_chord = (pad->Buttons & PSP_CTRL_RTRIGGER) != 0;
+    if (switch_chord && (pad->Buttons & PSP_CTRL_CROSS))
+        try_manual_switch_to(&player_team, 0);
+    else if (switch_chord && (pad->Buttons & PSP_CTRL_SQUARE))
+        try_manual_switch_to(&player_team, 1);
+    else if (switch_chord && (pad->Buttons & PSP_CTRL_CIRCLE))
+        try_manual_switch_to(&player_team, 2);
+    else if (pressed(pad->Buttons, PSP_CTRL_RTRIGGER))
+        try_manual_switch(&player_team);
+    if (!switch_chord && (pad->Buttons & PSP_CTRL_CROSS)) do_basic_attack(0);
+    if (!switch_chord && pressed(pad->Buttons, PSP_CTRL_SQUARE)) {
+        if (pad->Buttons & PSP_CTRL_LTRIGGER) do_protect(&player_team);
         else do_skill(0);
     }
-    if (pressed(pad->Buttons, PSP_CTRL_CIRCLE)) do_dash(&player_team, dx, dy);
-    if (pressed(pad->Buttons, PSP_CTRL_TRIANGLE)) begin_ultimate(&player_team);
+    if (!switch_chord && pressed(pad->Buttons, PSP_CTRL_CIRCLE)) {
+        if (pad->Buttons & PSP_CTRL_LTRIGGER) do_utility(0);
+        else do_dash(&player_team, dx, dy);
+    }
+    if (!switch_chord && pressed(pad->Buttons, PSP_CTRL_TRIANGLE))
+        begin_ultimate(&player_team);
 }
 
 static int cpu_dodge_percent(void) {
@@ -789,6 +946,7 @@ static void update_cpu(void) {
     Fighter *f = current_cpu();
     update_fighter_timers(f);
     if (cpu_team.switch_delay > 0 || f->hp <= 0 || f->sleep_frames > 0) return;
+    f->moving = 0;
     Fighter *target = current_player();
     float dx = target->x - f->x, dy = target->y - f->y;
     float distance = length2(dx, dy);
@@ -806,33 +964,41 @@ static void update_cpu(void) {
         }
         if (threatened && f->dash_cd == 0 && random_range(100) < cpu_dodge_percent()) {
             do_dash(&cpu_team, -f->aim_x, -f->aim_y);
+        } else if (threatened && f->protect_cd == 0 && random_range(100) < cpu_dodge_percent()) {
+            do_protect(&cpu_team);
         }
         if (f->ultimate >= 100 && distance < 230.0f) begin_ultimate(&cpu_team);
         else if (distance > 92.0f) {
             f->x += f->aim_x * (save_data.difficulty == 2 ? 1.15f : 0.82f);
             f->y += f->aim_y * (save_data.difficulty == 2 ? 1.15f : 0.82f);
+            f->moving = 1;
         } else if (distance < 50.0f) {
             f->x -= f->aim_x * 0.65f; f->y -= f->aim_y * 0.65f;
+            f->moving = 1;
         }
     }
+    if (f->moving) ++f->anim_phase;
     f->x += f->knock_x; f->y += f->knock_y;
     f->knock_x *= 0.82f; f->knock_y *= 0.82f;
     keep_in_arena(f);
     if (distance < 190.0f && f->basic_cd == 0) do_basic_attack(1);
     if (distance < 220.0f && f->skill_cd == 0 && random_range(100) < 22) do_skill(1);
+    if (distance < 205.0f && f->utility_cd == 0 && random_range(100) < 8) do_utility(1);
 }
 
 static void update_projectiles(void) {
     for (int i = 0; i < MAX_PROJECTILES; ++i) {
         Projectile *p = &projectiles[i];
         if (!p->active) continue;
+        p->prev_x = p->x; p->prev_y = p->y;
         p->x += p->vx; p->y += p->vy; --p->life;
+        ++p->age;
         Fighter *target = p->owner == 0 ? current_cpu() : current_player();
         Fighter *attacker = p->owner == 0 ? current_player() : current_cpu();
         float dx = target->x - p->x, dy = target->y - p->y;
         float radius = p->heavy ? 23.0f : 17.0f;
         if (dx * dx + dy * dy < radius * radius) {
-            apply_damage(target, attacker, p->damage, p->type, 0, p->x, p->y);
+            apply_damage(target, attacker, p->damage, p->type, 0, p->x, p->y, p->effect);
             p->active = 0;
         } else if (p->life <= 0 || p->x < ARENA_LEFT || p->x > ARENA_RIGHT ||
                    p->y < ARENA_TOP || p->y > ARENA_BOTTOM) p->active = 0;
@@ -899,6 +1065,39 @@ static uint16_t color(unsigned int r, unsigned int g, unsigned int b) {
     return rgb565(r, g, b);
 }
 
+static uint16_t type_color(Type type) {
+    static const uint8_t rgb[TYPE_COUNT][3] = {
+        {200,200,188},{248,128,72},{84,176,248},{250,218,70},{112,204,93},{132,218,240},
+        {214,106,93},{172,90,177},{194,156,91},{151,203,236},{210,120,219},{174,194,94},
+        {184,164,122},{127,108,166},{135,116,224},{126,106,103},{170,185,191},{231,151,193}
+    };
+    if (type < 0 || type >= TYPE_COUNT) return color(245,245,245);
+    return color(rgb[type][0], rgb[type][1], rgb[type][2]);
+}
+
+static void fill_ellipse(int cx, int cy, int rx, int ry, uint16_t c) {
+    if (rx <= 0 || ry <= 0) return;
+    for (int dy = -ry; dy <= ry; ++dy) {
+        float t = 1.0f - (float)(dy * dy) / (float)(ry * ry);
+        if (t < 0.0f) t = 0.0f;
+        int span = (int)((float)rx * sqrtf(t));
+        fill_rect(cx - span, cy + dy, span * 2 + 1, 1, c);
+    }
+}
+
+static void draw_line(int x0, int y0, int x1, int y1, uint16_t c) {
+    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    for (;;) {
+        fill_rect(x0, y0, 2, 2, c);
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = err * 2;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+
 static void draw_outline(int x, int y, int w, int h, uint16_t c) {
     fill_rect(x, y, w, 2, c); fill_rect(x, y + h - 2, w, 2, c);
     fill_rect(x, y, 2, h, c); fill_rect(x + w - 2, y, 2, h, c);
@@ -912,11 +1111,8 @@ static void draw_bar(int x, int y, int w, int h, int value, int maximum, uint16_
     draw_outline(x, y, w, h, color(215, 223, 224));
 }
 
-static void draw_sprite(int species_id, int x, int y, int size, int flip) {
-    if (!sprites_loaded || size <= 0) return;
-    if (species_id < 0 || species_id >= ROSTER_SIZE) species_id = 0;
-    int tile_x = (species_id % SPRITE_ATLAS_SIDE) * SPRITE_SIDE;
-    int tile_y = (species_id / SPRITE_ATLAS_SIDE) * SPRITE_SIDE;
+static void draw_sprite_tile(const uint16_t *tile, int x, int y, int size, int flip) {
+    if (!tile || size <= 0) return;
     const uint16_t transparent = 0xF81F;
     for (int dy = 0; dy < size; ++dy) {
         int py = y + dy;
@@ -928,9 +1124,70 @@ static void draw_sprite(int species_id, int x, int y, int size, int flip) {
             if (px < 0 || px >= SCREEN_W) continue;
             int sx = dx * SPRITE_SIDE / size;
             if (flip) sx = SPRITE_SIDE - 1 - sx;
-            uint16_t color565 = sprite_atlas[(tile_y + sy) * SPRITE_ATLAS_W + tile_x + sx];
+            uint16_t color565 = tile[sy * SPRITE_SIDE + sx];
             if (color565 != transparent) dst[px] = color565;
         }
+    }
+}
+
+static void draw_sprite(int species_id, int x, int y, int size, int flip) {
+    if (!sprites_loaded || size <= 0) return;
+    if (species_id < 0 || species_id >= ROSTER_SIZE) species_id = 0;
+    const uint16_t *tile = sprite_atlas + species_id * SPRITE_SIDE * SPRITE_SIDE;
+    draw_sprite_tile(tile, x, y, size, flip);
+}
+
+static void draw_animated_sprite(int species_id, int animation_frame,
+                                 int x, int y, int size, int flip) {
+    if (!animations_loaded || size <= 0) {
+        draw_sprite(species_id, x, y, size, flip);
+        return;
+    }
+    if (species_id < 0 || species_id >= ROSTER_SIZE) species_id = 0;
+    if (animation_frame < 0 || animation_frame >= SPRITE_ANIMATION_FRAMES)
+        animation_frame = 0;
+    int tile_index = species_id * SPRITE_ANIMATION_FRAMES + animation_frame;
+    const uint16_t *tile = sprite_animations + tile_index * SPRITE_SIDE * SPRITE_SIDE;
+    draw_sprite_tile(tile, x, y, size, flip);
+}
+
+static int fighter_animation_frame(const Fighter *f) {
+    int movement_frame = (f->anim_phase / 4) & 3;
+    if (f->attack_frames > 0 &&
+        (f->attack_kind == 1 || f->attack_kind == 2 ||
+         f->attack_kind == 3 || f->attack_kind == 6)) {
+        int duration = f->attack_kind == 1 ? 8 :
+                       f->attack_kind == 2 ? 14 :
+                       f->attack_kind == 3 ? 18 : 42;
+        int elapsed = duration - f->attack_frames;
+        int action_frame = elapsed * 4 / duration;
+        if (action_frame < 0) action_frame = 0;
+        if (action_frame > 3) action_frame = 3;
+        return 8 + action_frame;
+    }
+    if (f->moving || (f->attack_frames > 0 && f->attack_kind == 5))
+        return 4 + movement_frame;
+    return (frame_number / 16) % 4;
+}
+
+static void draw_projectile(const Projectile *p) {
+    uint16_t main = type_color(p->type);
+    uint16_t light = color(255,250,229);
+    if (p->owner) main = color(255,126,130);
+    draw_line((int)p->prev_x, (int)p->prev_y, (int)p->x, (int)p->y,
+              p->heavy ? main : color(114,128,157));
+    if (p->type == TYPE_ELECTRIC) {
+        int mx = ((int)p->prev_x + (int)p->x) / 2;
+        int my = ((int)p->prev_y + (int)p->y) / 2;
+        draw_line((int)p->prev_x, (int)p->prev_y, mx + 4, my - 5, main);
+        draw_line(mx + 4, my - 5, (int)p->x, (int)p->y, light);
+    }
+    int pulse = (p->age & 1);
+    fill_circle((int)p->x, (int)p->y, p->heavy ? 9 + pulse : 6, main);
+    fill_circle((int)p->x, (int)p->y, p->heavy ? 4 : 2, light);
+    if (p->heavy && (p->age & 3) < 2) {
+        fill_circle((int)p->x, (int)p->y, 12, color(255,255,255));
+        fill_circle((int)p->x, (int)p->y, 9, main);
     }
 }
 
@@ -949,35 +1206,46 @@ static uint16_t arena_color(int arena, int variant) {
 
 static void draw_fighter(const Fighter *f, int side) {
     const Species *sp = get_species(f->species);
-    uint16_t body = color(sp->r, sp->g, sp->b);
     int x = (int)f->x, y = (int)f->y;
-    int r = f->flash > 0 && !save_data.reduced_flash && (frame_number & 1) ? 13 : 10;
     if (f->invulnerable > 0 && (frame_number & 2)) return;
-    fill_circle(x, y + 18, 16, color(20, 28, 35));
+    int bob = f->moving ? ((f->anim_phase / 5) & 1 ? -2 : 1) : ((frame_number / 28) & 1);
+    int push = f->attack_frames > 0 && f->attack_kind <= 3 ? 3 : 0;
+    int draw_x = x + (int)(f->aim_x * push);
+    int draw_y = y + bob;
+    fill_ellipse(draw_x, draw_y + 23, 25, 7, color(20, 28, 35));
     if (f->flash > 0 && !save_data.reduced_flash && (frame_number & 1)) {
-        fill_circle(x, y, 33, color(255, 255, 255));
-        fill_circle(x, y, 28, arena_color(save_data.arena, 1));
+        fill_circle(draw_x, draw_y, 34, color(255, 255, 255));
+        fill_circle(draw_x, draw_y, 30, arena_color(save_data.arena, 1));
     }
     if (f->protect_frames > 0) {
-        fill_circle(x, y, 34, color(79, 199, 236));
-        fill_circle(x, y, 29, arena_color(save_data.arena, 1));
+        fill_circle(draw_x, draw_y, 34, color(79, 199, 236));
+        fill_circle(draw_x, draw_y, 29, arena_color(save_data.arena, 1));
     }
     if (f->cast_frames > 0) {
         int ring = 32 + (f->cast_frames % 5);
-        fill_circle(x, y, ring, color(253, 220, 96));
-        fill_circle(x, y, ring - 5, arena_color(save_data.arena, 1));
+        fill_circle(draw_x, draw_y, ring, type_color(get_moveset(f->species)->ultimate_type));
+        fill_circle(draw_x, draw_y, ring - 5, arena_color(save_data.arena, 1));
     }
-    if (sprites_loaded) draw_sprite(f->species, x - 28, y - 29, 56, side == 1);
+    if (sprites_loaded)
+        draw_animated_sprite(f->species, fighter_animation_frame(f),
+                             draw_x - 32, draw_y - 40, 64, f->aim_x > 0.0f);
     else {
-        fill_circle(x, y, r, body);
-        fill_circle(x - 6, y - 7, 4, body);
-        fill_circle(x + 6, y - 7, 4, body);
-        fill_circle(x - 3, y - 2, 1, color(20, 22, 24));
-        fill_circle(x + 3, y - 2, 1, color(20, 22, 24));
-        fill_rect(x - 3, y + 4, 6, 1, color(30, 24, 25));
+        fill_rect(draw_x - 27, draw_y - 12, 54, 24, color(24,30,42));
+        draw_outline(draw_x - 27, draw_y - 12, 54, 24, color(255,120,110));
+        draw_text(draw_x - (int)strlen(sp->name) * 2, draw_y - 2,
+                  sp->name, 1, color(255,235,220));
     }
-    if (side == 0) fill_rect(x - 2, y + 12, 4, 3, color(92, 204, 255));
-    else fill_rect(x - 2, y + 12, 4, 3, color(255, 117, 120));
+    if (f->attack_frames > 0 && f->attack_kind == 1 && sp->physical) {
+        int reach = 34 + (f->attack_frames & 3) * 3;
+        int sign = f->aim_x < 0.0f ? -1 : 1;
+        draw_line(draw_x + sign * 18, draw_y, draw_x + sign * reach, draw_y - 8, type_color(sp->primary));
+        draw_line(draw_x + sign * 19, draw_y + 3, draw_x + sign * (reach - 2), draw_y + 2, color(255,240,214));
+    }
+    if (f->burn_frames > 0) draw_text(draw_x - 7, draw_y - 47, "BRN", 1, color(255,151,76));
+    else if (f->poison_frames > 0) draw_text(draw_x - 7, draw_y - 47, "PSN", 1, color(208,125,236));
+    else if (f->paralysis_frames > 0) draw_text(draw_x - 7, draw_y - 47, "PAR", 1, color(255,226,91));
+    else if (f->sleep_frames > 0) draw_text(draw_x - 7, draw_y - 47, "SLP", 1, color(176,210,255));
+    (void)side;
 }
 
 static void draw_arena(void) {
@@ -1023,9 +1291,7 @@ static void draw_battle(void) {
     for (int i = 0; i < MAX_PROJECTILES; ++i) {
         Projectile *p = &projectiles[i];
         if (!p->active) continue;
-        uint16_t c = p->heavy ? color(255,226,103) : color(255,255,241);
-        if (p->owner) c = color(255,143,119);
-        fill_circle((int)p->x, (int)p->y, p->heavy ? 7 : 4, c);
+        draw_projectile(p);
     }
     if (supply.active) {
         uint16_t c = supply.kind == SUPPLY_HEAL ? color(113,245,139) :
@@ -1040,8 +1306,15 @@ static void draw_battle(void) {
     if (player_team.switch_delay > 0) draw_center(133, "SWITCHING", 2, color(250,240,190));
     draw_fighter(current_player(), 0);
     draw_fighter(current_cpu(), 1);
-    draw_text(12, 257, "X ATTACK  SQ SKILL  O DASH  TRI ULT", 1, color(242,244,225));
-    draw_text(367, 257, "START PAUSE", 1, color(242,244,225));
+    char clock[16];
+    snprintf(clock, sizeof(clock), "%02d:%02d", match_frames / 3600, (match_frames / 60) % 60);
+    draw_center(8, clock, 1, color(255,232,143));
+    fill_rect(0, 248, SCREEN_W, 24, color(13,22,32));
+    draw_text(9, 251, "X BASIC SQ SKILL O DASH L+O MOVE TRI ULT", 1, color(242,244,225));
+    if (player_team.count > 1)
+        draw_text(39, 261, "L+SQ GUARD R+X/SQ/O SLOT 1/2/3 START PAUSE", 1, color(182,204,210));
+    else
+        draw_text(95, 261, "L+SQ GUARD  START PAUSE", 1, color(182,204,210));
 }
 
 static void draw_panel(int x, int y, int w, int h) {
@@ -1083,21 +1356,39 @@ static const char *difficulty_name(int d) {
 static void draw_menu(void) {
     static const char *items[] = {"QUICK BATTLE", "VS CPU", "STORY", "YOUR TEAMS", "SETTINGS", "ONLINE", "EXIT"};
     draw_menu_list("MAIN MENU", items, 7, menu_cursor, 115);
-    draw_text(122, 211, "3V3 CPU   16 STORY DUELS   6 ARENAS", 1, color(138, 207, 205));
+    if (save_data.quick_wins < 2) {
+        char training[32];
+        snprintf(training, sizeof(training), "PIKACHU TRAINING %d/2 WINS", save_data.quick_wins);
+        draw_text(123, 211, training, 1, color(138, 207, 205));
+    } else {
+        draw_text(122, 211, "3V3 CPU   16 STORY DUELS   6 ARENAS", 1, color(138, 207, 205));
+    }
+    if (!sprites_loaded)
+        draw_center(223, "SPRITES MISSING - EXTRACT FULL ZIP", 1, color(255,145,130));
 }
 
 static void draw_setup(void) {
     draw_title();
     draw_center(89, "VS CPU SETUP", 2, color(245,240,220));
-    const char *labels[] = {"DIFFICULTY", "ARENA", "START MATCH"};
-    for (int i = 0; i < 3; ++i) {
-        int y = 122 + i * 31;
-        if (i == vs_setup_cursor) fill_rect(115, y - 3, 250, 19, color(40,104,130));
-        draw_text(130, y, labels[i], 1, color(245,241,221));
-        if (i == 0) draw_text(270, y, difficulty_name(save_data.difficulty), 1, color(255,220,118));
-        if (i == 1) draw_text(270, y, arena_names[save_data.arena], 1, color(255,220,118));
+    const char *labels[] = {"PLAYER TEAM", "EDIT TEAM", "CPU LEVEL", "ARENA", "START MATCH"};
+    for (int i = 0; i < 5; ++i) {
+        int y = 112 + i * 23;
+        if (i == vs_setup_cursor) fill_rect(105, y - 3, 270, 18, color(40,104,130));
+        draw_text(118, y, labels[i], 1, color(245,241,221));
+        if (i == 0) {
+            int team = save_data.selected_team;
+            draw_text(266, y, team == 0 ? "ONE" : team == 1 ? "TWO" : "THREE", 1, color(255,220,118));
+        }
+        if (i == 2) draw_text(266, y, difficulty_name(save_data.difficulty), 1, color(255,220,118));
+        if (i == 3) draw_text(266, y, arena_names[save_data.arena], 1, color(255,220,118));
     }
-    draw_text(121, 226, "LEFT RIGHT CHANGE   X SELECT   O BACK", 1, color(173,197,202));
+    char lineup[64];
+    snprintf(lineup, sizeof(lineup), "P1 %s  P2 %s  P3 %s",
+             roster[save_data.teams[save_data.selected_team][0]].name,
+             roster[save_data.teams[save_data.selected_team][1]].name,
+             roster[save_data.teams[save_data.selected_team][2]].name);
+    draw_center(222, lineup, 1, color(174,207,204));
+    draw_text(91, 231, "LEFT RIGHT CHANGE   X EDIT OR START   O BACK", 1, color(173,197,202));
 }
 
 static void draw_story(void) {
@@ -1120,23 +1411,38 @@ static void draw_story(void) {
 
 static void draw_teams(void) {
     draw_title();
-    draw_center(87, "TEAM BUILDER", 2, color(245,240,220));
-    draw_text(117, 108, "TEAM", 1, color(173,197,202));
-    for (int t = 0; t < 3; ++t) {
-        int x = 162 + t * 53;
-        if (t == save_data.selected_team) fill_rect(x - 5, 103, 45, 15, color(40,104,130));
-        draw_text(x, 108, t == 0 ? "ONE" : t == 1 ? "TWO" : "THREE", 1, color(245,241,221));
-    }
+    draw_center(85, "CHOOSE YOUR POKEMON", 2, color(245,240,220));
+    const char *team_name = save_data.selected_team == 0 ? "TEAM ONE" :
+                            save_data.selected_team == 1 ? "TEAM TWO" : "TEAM THREE";
+    draw_center(104, team_name, 1, color(173,197,202));
     for (int s = 0; s < TEAM_SIZE; ++s) {
-        int y = 137 + s * 25;
-        if (s == team_slot) fill_rect(110, y - 3, 260, 19, color(40,104,130));
-        draw_text(120, y, s == 0 ? "LEAD" : s == 1 ? "ALLY" : "ALLY", 1, color(180,205,209));
-        draw_text(174, y, get_species(save_data.teams[save_data.selected_team][s])->name, 1, color(255,222,119));
-        draw_text(315, y, "L R EDIT", 1, color(159,193,198));
-        draw_sprite(save_data.teams[save_data.selected_team][s], 332, y - 8, 24, 0);
+        int x = 67 + s * 111;
+        if (s == team_slot) fill_rect(x - 2, 112, 106, 31, color(40,104,130));
+        draw_sprite(save_data.teams[save_data.selected_team][s], x, 114, 27, 0);
+        draw_text(x + 29, 124, get_species(save_data.teams[save_data.selected_team][s])->name,
+                  1, color(255,222,119));
     }
-    draw_text(108, 222, "UP DOWN SPECIES   LEFT RIGHT TEAM", 1, color(173,197,202));
-    draw_text(121, 235, "X SET   SQ SLOT   O BACK", 1, color(173,197,202));
+    draw_panel(10, 146, 138, 103);
+    draw_animated_sprite(team_cursor, (frame_number / 16) % 4, 48, 147, 60, 0);
+    const Species *candidate = get_species(team_cursor);
+    const MoveSet *moves = get_moveset(team_cursor);
+    draw_text(16, 210, candidate->name, 1, color(255,222,119));
+    draw_text(16, 219, type_names[candidate->primary], 1, type_color(candidate->primary));
+    draw_text(16, 228, "SQ", 1, color(173,197,202));
+    draw_text(36, 228, moves->skill_name, 1, color(245,241,221));
+    draw_text(16, 237, "L+O", 1, color(173,197,202));
+    draw_text(36, 237, moves->utility_name, 1, color(245,241,221));
+    draw_text(16, 246, "TRI", 1, color(173,197,202));
+    draw_text(36, 246, moves->ultimate_name, 1, color(245,241,221));
+    for (int id = 0; id < ROSTER_SIZE; ++id) {
+        int col = id % 4, row = id / 4;
+        int x = 155 + col * 80, y = 151 + row * 14;
+        if (id == team_cursor) fill_rect(x - 2, y - 1, 78, 14, color(40,104,130));
+        draw_sprite(id, x, y - 1, 14, 0);
+        draw_text(x + 16, y + 4, roster[id].name, 1,
+                  id == team_cursor ? color(255,222,119) : color(224,232,220));
+    }
+    draw_text(49, 260, "ARROWS PICK  X SET  L/R SLOT  SQ TEAM  O BACK", 1, color(173,197,202));
 }
 
 static void draw_settings(void) {
@@ -1215,7 +1521,12 @@ static void handle_menu(const SceCtrlData *pad) {
         case 0: start_match(MODE_QUICK); break;
         case 1: vs_setup_cursor = 0; screen = SCREEN_VS_SETUP; break;
         case 2: story_cursor = save_data.story_progress < 16 ? save_data.story_progress : 15; screen = SCREEN_STORY_SELECT; break;
-        case 3: team_slot = 0; team_cursor = save_data.teams[save_data.selected_team][0]; screen = SCREEN_TEAMS; break;
+        case 3:
+            team_slot = 0;
+            team_cursor = save_data.teams[save_data.selected_team][0];
+            team_return_screen = SCREEN_MENU;
+            screen = SCREEN_TEAMS;
+            break;
         case 4: settings_cursor = 0; screen = SCREEN_SETTINGS; break;
         case 5: screen = SCREEN_ONLINE_INFO; break;
         case 6: sceKernelExitGame(); break;
@@ -1224,14 +1535,21 @@ static void handle_menu(const SceCtrlData *pad) {
 }
 
 static void handle_setup(const SceCtrlData *pad) {
-    if (pressed(pad->Buttons, PSP_CTRL_UP)) vs_setup_cursor = (vs_setup_cursor + 2) % 3;
-    if (pressed(pad->Buttons, PSP_CTRL_DOWN)) vs_setup_cursor = (vs_setup_cursor + 1) % 3;
+    if (pressed(pad->Buttons, PSP_CTRL_UP)) vs_setup_cursor = (vs_setup_cursor + 4) % 5;
+    if (pressed(pad->Buttons, PSP_CTRL_DOWN)) vs_setup_cursor = (vs_setup_cursor + 1) % 5;
     int dir = pressed(pad->Buttons, PSP_CTRL_LEFT) ? -1 : pressed(pad->Buttons, PSP_CTRL_RIGHT) ? 1 : 0;
-    if (dir && vs_setup_cursor == 0) save_data.difficulty = (uint8_t)((save_data.difficulty + dir + 3) % 3);
-    if (dir && vs_setup_cursor == 1) save_data.arena = (uint8_t)((save_data.arena + dir + 6) % 6);
+    if (dir && vs_setup_cursor == 0)
+        save_data.selected_team = (uint8_t)((save_data.selected_team + dir + 3) % 3);
+    if (dir && vs_setup_cursor == 2) save_data.difficulty = (uint8_t)((save_data.difficulty + dir + 3) % 3);
+    if (dir && vs_setup_cursor == 3) save_data.arena = (uint8_t)((save_data.arena + dir + 6) % 6);
     if (pressed(pad->Buttons, PSP_CTRL_CROSS)) {
-        if (vs_setup_cursor == 2) start_match(MODE_VS_CPU);
-        else vs_setup_cursor = (vs_setup_cursor + 1) % 3;
+        if (vs_setup_cursor == 0 || vs_setup_cursor == 1) {
+            team_slot = 0;
+            team_cursor = save_data.teams[save_data.selected_team][team_slot];
+            team_return_screen = SCREEN_VS_SETUP;
+            screen = SCREEN_TEAMS;
+        } else if (vs_setup_cursor == 4) start_match(MODE_VS_CPU);
+        else vs_setup_cursor = (vs_setup_cursor + 1) % 5;
     }
     if (pressed(pad->Buttons, PSP_CTRL_CIRCLE)) screen = SCREEN_MENU;
 }
@@ -1258,15 +1576,27 @@ static void handle_story(const SceCtrlData *pad) {
 }
 
 static void handle_teams(const SceCtrlData *pad) {
-    if (pressed(pad->Buttons, PSP_CTRL_LEFT)) save_data.selected_team = (uint8_t)((save_data.selected_team + 2) % 3);
-    if (pressed(pad->Buttons, PSP_CTRL_RIGHT)) save_data.selected_team = (uint8_t)((save_data.selected_team + 1) % 3);
-    if (pressed(pad->Buttons, PSP_CTRL_UP)) change_species(&team_cursor, 1);
-    if (pressed(pad->Buttons, PSP_CTRL_DOWN)) change_species(&team_cursor, -1);
-    if (pressed(pad->Buttons, PSP_CTRL_SQUARE)) team_slot = (team_slot + 1) % TEAM_SIZE;
+    if (pressed(pad->Buttons, PSP_CTRL_LEFT)) team_cursor = (team_cursor + ROSTER_SIZE - 1) % ROSTER_SIZE;
+    if (pressed(pad->Buttons, PSP_CTRL_RIGHT)) team_cursor = (team_cursor + 1) % ROSTER_SIZE;
+    if (pressed(pad->Buttons, PSP_CTRL_UP)) team_cursor = (team_cursor + ROSTER_SIZE - 4) % ROSTER_SIZE;
+    if (pressed(pad->Buttons, PSP_CTRL_DOWN)) team_cursor = (team_cursor + 4) % ROSTER_SIZE;
     if (pressed(pad->Buttons, PSP_CTRL_CROSS)) save_team_editor();
-    if (pressed(pad->Buttons, PSP_CTRL_LTRIGGER)) team_slot = (team_slot + TEAM_SIZE - 1) % TEAM_SIZE;
-    if (pressed(pad->Buttons, PSP_CTRL_RTRIGGER)) team_slot = (team_slot + 1) % TEAM_SIZE;
-    if (pressed(pad->Buttons, PSP_CTRL_CIRCLE)) screen = SCREEN_MENU;
+    if (pressed(pad->Buttons, PSP_CTRL_SQUARE)) {
+        save_data.selected_team = (uint8_t)((save_data.selected_team + 1) % 3);
+        team_cursor = save_data.teams[save_data.selected_team][team_slot];
+    }
+    if (pressed(pad->Buttons, PSP_CTRL_LTRIGGER)) {
+        team_slot = (team_slot + TEAM_SIZE - 1) % TEAM_SIZE;
+        team_cursor = save_data.teams[save_data.selected_team][team_slot];
+    }
+    if (pressed(pad->Buttons, PSP_CTRL_RTRIGGER)) {
+        team_slot = (team_slot + 1) % TEAM_SIZE;
+        team_cursor = save_data.teams[save_data.selected_team][team_slot];
+    }
+    if (pressed(pad->Buttons, PSP_CTRL_CIRCLE)) {
+        save_game();
+        screen = team_return_screen;
+    }
 }
 
 static void handle_settings(const SceCtrlData *pad) {

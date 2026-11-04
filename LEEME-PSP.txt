@@ -9,11 +9,13 @@ CONTROLES EN PARTIDA
 Stick analogico o cruceta: moverse
 L + cruceta: apuntar
 X: ataque basico
-Cuadrado: habilidad
+Cuadrado: habilidad de la especie
+L + Circulo: movimiento especial/utility de la especie
 L + Cuadrado: Protect
 Circulo: dash
 Triangulo: ultimate
 R: cambiar al siguiente companero disponible
+R + X / Cuadrado / Circulo: elegir directamente el hueco 1 / 2 / 3
 Start: pausa
 Select: salir
 
@@ -21,11 +23,16 @@ EN MENUS
 Cruceta: moverse por las opciones
 X: confirmar
 Circulo: volver
+En VS CPU, elige el equipo y abre EDIT TEAM para seleccionar Pokemon.
+En el editor: cruceta para navegar la plantilla, X para asignar,
+L/R para cambiar hueco, Cuadrado para cambiar de equipo.
 
-Incluye Quick Battle, VS CPU, Story de 16 retos, editor de tres equipos,
-seis arenas, 25 Pokemon, tres dificultades de CPU y guardado en Memory Stick.
+Incluye dos duelos de entrenamiento de Pikachu y despues Quick Battle 3v3;
+VS CPU permite elegir equipos, seis arenas, 25 Pokemon, tres dificultades,
+Story de 16 retos y guardado en Memory Stick. Los Pokemon tienen movimientos,
+efectos y animaciones de reposo, movimiento y ataque.
 El modo online, el brawl de tres jugadores y la plantilla completa de la web
 no estan implementados en esta version PSP.
 
-Los sprites comunitarios y sus creditos/licencia estan en assets/.
+Los sprites comunitarios, animaciones, creditos y licencia estan en assets/.
 Es un proyecto fan no comercial y no oficial.
